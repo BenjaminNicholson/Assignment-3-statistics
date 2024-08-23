@@ -1,0 +1,148 @@
+---
+title: "Untitled"
+author: "Benjamin Nicholson"
+date: "2024-08-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r libraries}
+install.packages("ggpubr")
+install.packages("car")
+
+library(tidyverse)
+library(readr)
+library(ggpubr)
+library(car)
+
+# Set working directory
+setwd("C:/Users/Altani/Documents/R/RCode")
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r load data, echo=FALSE}
+# Load and clean the data
+inflation_raw <- read_csv("inflation_annual_percent.csv") %>% drop_na()
+min_exp_raw <- read_csv("mincpcap_cppp.csv") %>% drop_na()
+hdi_raw <- read_csv("hdi_human_development_index.csv") %>% drop_na()
+
+# Set seed for reproducibility
+set.seed(123)
+```
+
+```{r sample data}
+# Sample 20 countries and select years from 1990 to 2010
+sample_countries <- sample(unique(inflation_raw$country), 20)
+sample_years <- as.character(1990:2010)
+
+# Filter the datasets
+inflation_sample <- inflation_raw %>% filter(country %in% sample_countries) %>% select(country, all_of(sample_years))
+min_exp_sample <- min_exp_raw %>% filter(country %in% sample_countries) %>% select(country, all_of(sample_years))
+hdi_2010 <- hdi_raw %>% select(country, `2010`) %>% rename(HDI_2010 = `2010`)
+```
+
+```{r}
+# Create categorical HDI variable
+hdi_2010 <- hdi_2010 %>%
+  mutate(HDI_Category = case_when(
+    HDI_2010 < 0.55 ~ "1",  # Low Development
+    HDI_2010 >= 0.55 & HDI_2010 < 0.70 ~ "2",  # Medium Development
+    HDI_2010 >= 0.70 & HDI_2010 < 0.85 ~ "3",  # High Development
+    HDI_2010 >= 0.85 ~ "4"   # Very High Development
+  ))
+
+# Pivot data to long format and merge datasets
+inflation_long <- inflation_sample %>%
+  pivot_longer(cols = -country, names_to = "Year", values_to = "Inflation_Rate") %>%
+  mutate(Year = as.numeric(Year), Inflation_Rate = as.numeric(gsub("[^0-9.-]", "", Inflation_Rate)))
+
+min_exp_long <- min_exp_sample %>%
+  pivot_longer(cols = -country, names_to = "Year", values_to = "Minimum_Consumption_Expenditure") %>%
+  mutate(Year = as.numeric(Year), Minimum_Consumption_Expenditure = as.numeric(Minimum_Consumption_Expenditure))
+
+# Merge datasets
+data <- merge(inflation_long, min_exp_long, by = c("country", "Year"))
+data <- merge(data, hdi_2010, by = "country")
+
+# Summary statistics
+summary(data)
+```
+
+```{r}
+# Histogram for each variable
+ggplot(data, aes(x = Inflation_Rate)) + geom_histogram(binwidth = 1, fill = "blue", color = "black", alpha = 0.7) +
+  theme_minimal() + labs(title = "Histogram of Inflation Rate", x = "Inflation Rate", y = "Frequency")
+
+ggplot(data, aes(x = Minimum_Consumption_Expenditure)) + geom_histogram(binwidth = 100, fill = "green", color = "black", alpha = 0.7) +
+  theme_minimal() + labs(title = "Histogram of Minimum Consumption Expenditure", x = "Minimum Consumption Expenditure", y = "Frequency")
+
+# Summary table for numeric variables
+summary_table <- data %>%
+  summarise(
+    Mean_Inflation = mean(Inflation_Rate, na.rm = TRUE),
+    Median_Inflation = median(Inflation_Rate, na.rm = TRUE),
+    SD_Inflation = sd(Inflation_Rate, na.rm = TRUE),
+    Mean_Min_Exp = mean(Minimum_Consumption_Expenditure, na.rm = TRUE),
+    Median_Min_Exp = median(Minimum_Consumption_Expenditure, na.rm = TRUE),
+    SD_Min_Exp = sd(Minimum_Consumption_Expenditure, na.rm = TRUE)
+  )
+summary_table
+
+```
+
+```{r}
+ggplot(data, aes(x = Inflation_Rate, y = Minimum_Consumption_Expenditure)) +
+  geom_point(alpha = 0.5) +
+  theme_minimal() +
+  labs(title = "Scatter Plot of Inflation Rate vs. Minimum Consumption Expenditure",
+       x = "Inflation Rate",
+       y = "Minimum Consumption Expenditure")
+```
+
+```{r}
+# Linear regression model
+regression_model <- lm(Minimum_Consumption_Expenditure ~ Inflation_Rate, data = data)
+summary(regression_model)
+
+# Residual diagnostics
+par(mfrow = c(2, 2))
+plot(regression_model)
+
+# Shapiro-Wilk test for normality of residuals
+shapiro_test_reg <- shapiro.test(residuals(regression_model))
+shapiro_test_reg
+```
+
+```{r}
+ggplot(data, aes(x = HDI_Category, y = Inflation_Rate, fill = HDI_Category)) +
+  geom_boxplot() +
+  theme_minimal() +
+  labs(title = "Inflation Rate across HDI Categories",
+       x = "HDI Category",
+       y = "Inflation Rate")
+
+anova_result <- aov(Inflation_Rate ~ HDI_Category, data = data)
+summary(anova_result)
+
+# Check assumptions
+# Q-Q plot
+ggplot(data, aes(sample = Inflation_Rate)) +
+  stat_qq() +
+  stat_qq_line() +
+  facet_wrap(~ HDI_Category) +
+  labs(title = "Q-Q Plot of Inflation Rate by HDI Category",
+       x = "Theoretical Quantiles",
+       y = "Sample Quantiles") +
+  theme_minimal()
+
+kruskal_test <- kruskal.test(data$Inflation_Rate ~ data$HDI_Category, data = data)
+print(kruskal_test)
+
+```
+
